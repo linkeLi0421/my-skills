@@ -1,4 +1,4 @@
-﻿---
+---
 name: summarize_to_notes
 description: Summarize raw text (chat transcripts, build logs, code snippets) into structured Markdown notes with YAML front matter and write them to a local notes git repo. Use when you need deterministic, local summarization and note creation from unstructured text.
 ---

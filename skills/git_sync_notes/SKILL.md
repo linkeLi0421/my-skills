@@ -1,4 +1,4 @@
-﻿---
+---
 name: git_sync_notes
 description: Safely sync a notes Git repository with GitHub by pulling with rebase, staging note changes, committing with a generated message, and pushing. Use after note-writing skills to automate repo sync without manual git steps.
 ---
