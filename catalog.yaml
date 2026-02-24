@@ -11,3 +11,7 @@
   description: Summarize raw text into structured Markdown notes and write them into a notes repo.
   path: skills/summarize_to_notes
   tags: [notes, summarization, markdown]
+- name: git_sync_notes
+  description: Sync a notes Git repo with pull --rebase, add, commit, and push.
+  path: skills/git_sync_notes
+  tags: [notes, git, sync]

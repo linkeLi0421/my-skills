@@ -13,6 +13,7 @@ except Exception:
     ZoneInfo = None
 
 DEFAULT_MAX_EXCERPT_LINES = 8
+DEFAULT_NOTES_REPO_PATH = "__NOTES_REPO_PATH__"
 MAX_TAGS = 12
 MAX_LINE_LEN = 300
 
@@ -389,7 +390,7 @@ def process(data):
     if not isinstance(data, dict):
         raise ValueError("Input JSON must be an object")
     text = ensure_string(data.get("text"), "text", required=True)
-    notes_repo_path = ensure_string(data.get("notes_repo_path"), "notes_repo_path", required=True)
+    notes_repo_path = ensure_string(data.get("notes_repo_path"), "notes_repo_path")
     meta = data.get("meta") or {}
     if not isinstance(meta, dict):
         raise ValueError("meta must be an object")
@@ -409,6 +410,12 @@ def process(data):
     if not isinstance(max_excerpt_lines, int) or max_excerpt_lines <= 0:
         raise ValueError("max_excerpt_lines must be a positive integer")
 
+    if not notes_repo_path:
+        notes_repo_path = DEFAULT_NOTES_REPO_PATH
+    if notes_repo_path == DEFAULT_NOTES_REPO_PATH:
+        raise ValueError(
+            "notes_repo_path is masked. Replace DEFAULT_NOTES_REPO_PATH in skill.py or provide notes_repo_path in input."
+        )
     if not os.path.isdir(notes_repo_path):
         raise ValueError("notes_repo_path does not exist or is not a directory")
 

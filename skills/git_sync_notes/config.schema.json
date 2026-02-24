@@ -1,0 +1,17 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "git_sync_notes input",
+  "type": "object",
+  "required": [],
+  "additionalProperties": false,
+  "properties": {
+    "repo_path": { "type": "string", "default": "__NOTES_REPO_PATH__" },
+    "commit_message": { "type": "string" },
+    "author_name": { "type": "string" },
+    "author_email": { "type": "string" },
+    "remote": { "type": "string", "default": "origin" },
+    "branch": { "type": "string" },
+    "add_paths": { "type": "array", "items": { "type": "string" } },
+    "allow_empty_commit": { "type": "boolean", "default": false }
+  }
+}

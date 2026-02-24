@@ -20,3 +20,4 @@ description: Summarize raw text (chat transcripts, build logs, code snippets) in
 - Extract key error/warning lines and file:line patterns for evidence.
 - Generate tags using simple heuristics and de-duplicate to a max of 12.
 - Fail gracefully with `ok=false` if the notes repo path is missing or input is invalid.
+- A masked default repo path is built in. Replace `DEFAULT_NOTES_REPO_PATH` in `skill.py` after installing, or pass `notes_repo_path` in input.
