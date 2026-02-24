@@ -1,0 +1,1 @@
+﻿Summarize raw text into a structured Markdown note with YAML front matter and write it into the provided notes repo. Use deterministic heuristics (errors/warnings, file:line patterns, tags) and return JSON with status, path, title, tags, and summary.

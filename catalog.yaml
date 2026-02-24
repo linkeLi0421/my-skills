@@ -1,0 +1,13 @@
+﻿# Skills catalog for this repo
+# Add entries as you create skills.
+#
+# Example:
+# - name: my-skill
+#   description: Brief summary
+#   path: skills/my-skill
+#   tags: [tag1, tag2]
+#
+- name: summarize_to_notes
+  description: Summarize raw text into structured Markdown notes and write them into a notes repo.
+  path: skills/summarize_to_notes
+  tags: [notes, summarization, markdown]
