@@ -16,6 +16,7 @@ DEFAULT_MAX_EXCERPT_LINES = 8
 DEFAULT_NOTES_REPO_PATH = "__NOTES_REPO_PATH__"
 MAX_TAGS = 12
 MAX_LINE_LEN = 300
+ALLOWED_MODES = {"auto", "summary", "document"}
 
 FILE_LINE_RE = re.compile(r"([A-Za-z0-9_./\\-]+):(\d+)(?::(\d+))?")
 URL_RE = re.compile(r"https?://\S+")
@@ -228,6 +229,58 @@ def build_tags(text, meta):
     return normalized[:MAX_TAGS]
 
 
+def build_tags_from_meta(meta):
+    tags = []
+    if isinstance(meta, dict):
+        tags.extend(meta.get("tags") or [])
+    normalized = []
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        norm = normalize_tag(tag)
+        if norm:
+            normalized.append(norm)
+    normalized = dedupe_preserve(normalized)
+    return normalized[:MAX_TAGS]
+
+
+def strip_leading_frontmatter(text):
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        for idx in range(1, min(len(lines), 80)):
+            if lines[idx].strip() == "---":
+                return "\n".join(lines[idx + 1 :]).lstrip("\n")
+    return text
+
+
+def extract_markdown_title(text):
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip()
+        break
+    return None
+
+
+def resolve_mode(mode, text):
+    if not mode:
+        mode = "auto"
+    if mode not in ALLOWED_MODES:
+        raise ValueError(f"mode must be one of: {', '.join(sorted(ALLOWED_MODES))}")
+    if mode != "auto":
+        return mode
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            return "document"
+        break
+    return "summary"
+
+
 def build_tldr(title, meta, file_refs, evidence_count):
     bullets = []
     if title:
@@ -347,6 +400,18 @@ def build_summary(title, meta, evidence_count):
     return " ".join(parts[:3]) if parts else "Summary not available."
 
 
+def build_document_summary(title, meta):
+    parts = []
+    if title:
+        parts.append(f"Stored document: {title}.")
+    project = meta.get("project") if isinstance(meta, dict) else None
+    topic = meta.get("topic") if isinstance(meta, dict) else None
+    if project or topic:
+        context = " / ".join([item for item in [project, topic] if item])
+        parts.append(f"Context: {context}.")
+    return " ".join(parts[:2]) if parts else "Stored document."
+
+
 def render_note(note_id, date_str, project, topic, tags, source, confidence, title, tldr, findings, evidence, next_steps, links):
     lines = [
         "---",
@@ -386,11 +451,42 @@ def render_note(note_id, date_str, project, topic, tags, source, confidence, tit
     return "\n".join(lines)
 
 
+def render_document(note_id, date_str, project, topic, tags, source, confidence, title, body):
+    lines = [
+        "---",
+        f"id: {note_id}",
+        f"date: {date_str}",
+        f"project: {yaml_safe(project)}",
+        f"topic: {yaml_safe(topic)}",
+        f"tags: {yaml_inline_list(tags)}",
+        f"source: {yaml_safe(source)}",
+        f"confidence: {confidence}",
+        "---",
+        "",
+    ]
+    body = body.strip("\n")
+    if not body:
+        lines.append(f"# {title}")
+        lines.append("")
+        lines.append("(empty document)")
+        lines.append("")
+        return "\n".join(lines)
+    if body.lstrip().startswith("#"):
+        lines.append(body)
+    else:
+        lines.append(f"# {title}")
+        lines.append("")
+        lines.append(body)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def process(data):
     if not isinstance(data, dict):
         raise ValueError("Input JSON must be an object")
     text = ensure_string(data.get("text"), "text", required=True)
     notes_repo_path = ensure_string(data.get("notes_repo_path"), "notes_repo_path")
+    mode = ensure_string(data.get("mode"), "mode")
     meta = data.get("meta") or {}
     if not isinstance(meta, dict):
         raise ValueError("meta must be an object")
@@ -423,16 +519,25 @@ def process(data):
     date_value = resolve_date(date_str, tzinfo)
     date_str = date_value.isoformat()
 
+    mode = resolve_mode(mode, text)
     lines = [line.rstrip("\n") for line in text.splitlines()]
-    evidence_lines = select_evidence(lines, max_excerpt_lines)
-    file_refs = extract_file_refs(lines)
 
     title = infer_title(lines, meta)
+    if mode == "document":
+        body = strip_leading_frontmatter(text)
+        doc_title = extract_markdown_title(body)
+        if doc_title:
+            title = doc_title
 
     slug_basis = None
     project = meta.get("project") or "general"
     topic = meta.get("topic") or "general"
-    if meta.get("project") or meta.get("topic"):
+    if mode == "document":
+        if slug_hint:
+            slug_basis = slug_hint
+        else:
+            slug_basis = title
+    elif meta.get("project") or meta.get("topic"):
         slug_basis = " ".join([item for item in [meta.get("project"), meta.get("topic")] if item])
     elif slug_hint:
         slug_basis = slug_hint
@@ -444,37 +549,53 @@ def process(data):
     shortid = hashlib.sha1(shortid_seed.encode("utf-8")).hexdigest()[:8]
     note_id = f"{date_str}-{slug}-{shortid}"
 
-    tags = build_tags(text, meta)
-
-    tldr = build_tldr(title, meta, file_refs, len(evidence_lines))
-    findings = build_key_findings(evidence_lines, meta, file_refs)
-    next_steps = build_next_steps(text, file_refs, meta)
-    links = build_links(text, meta)
     source = meta.get("source") or "chat"
-    confidence = estimate_confidence(evidence_lines)
-    summary = build_summary(title, meta, len(evidence_lines))
+    if mode == "document":
+        tags = build_tags_from_meta(meta)
+        confidence = "n/a"
+        summary = build_document_summary(title, meta)
+        note_content = render_document(
+            note_id=note_id,
+            date_str=date_str,
+            project=project,
+            topic=topic,
+            tags=tags,
+            source=source,
+            confidence=confidence,
+            title=title,
+            body=body,
+        )
+    else:
+        evidence_lines = select_evidence(lines, max_excerpt_lines)
+        file_refs = extract_file_refs(lines)
+        tags = build_tags(text, meta)
+        tldr = build_tldr(title, meta, file_refs, len(evidence_lines))
+        findings = build_key_findings(evidence_lines, meta, file_refs)
+        next_steps = build_next_steps(text, file_refs, meta)
+        links = build_links(text, meta)
+        confidence = estimate_confidence(evidence_lines)
+        summary = build_summary(title, meta, len(evidence_lines))
+        note_content = render_note(
+            note_id=note_id,
+            date_str=date_str,
+            project=project,
+            topic=topic,
+            tags=tags,
+            source=source,
+            confidence=confidence,
+            title=title,
+            tldr=tldr,
+            findings=findings,
+            evidence=evidence_lines,
+            next_steps=next_steps,
+            links=links,
+        )
 
     year = date_str[:4]
     year_month = date_str[:7]
     filename = f"{date_str}-{slug}-{shortid}.md"
     note_path = os.path.join(notes_repo_path, "notes", year, year_month, filename)
     os.makedirs(os.path.dirname(note_path), exist_ok=True)
-
-    note_content = render_note(
-        note_id=note_id,
-        date_str=date_str,
-        project=project,
-        topic=topic,
-        tags=tags,
-        source=source,
-        confidence=confidence,
-        title=title,
-        tldr=tldr,
-        findings=findings,
-        evidence=evidence_lines,
-        next_steps=next_steps,
-        links=links,
-    )
 
     with open(note_path, "w", encoding="utf-8") as handle:
         handle.write(note_content)

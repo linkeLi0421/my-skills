@@ -17,6 +17,7 @@ description: Summarize raw text (chat transcripts, build logs, code snippets) in
 ## Behavior
 - Build a note path as `{notes_repo_path}/notes/YYYY/YYYY-MM/YYYY-MM-DD-<slug>-<shortid>.md`.
 - Derive `<slug>` from `meta.project` + `meta.topic`, else `slug_hint`, else the inferred title.
+- Auto-detect Markdown documents (first non-empty line starts with `#`) and store the full document body instead of a summary. Override with `mode` (`auto`, `summary`, `document`).
 - Extract key error/warning lines and file:line patterns for evidence.
 - Generate tags using simple heuristics and de-duplicate to a max of 12.
 - Fail gracefully with `ok=false` if the notes repo path is missing or input is invalid.

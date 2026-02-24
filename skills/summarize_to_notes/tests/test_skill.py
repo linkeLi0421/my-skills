@@ -37,6 +37,23 @@ class SummarizeToNotesTests(unittest.TestCase):
         self.assertEqual(len(evidence), 1)
         self.assertLessEqual(len(evidence[0]), skill.MAX_LINE_LEN)
 
+    def test_document_mode_auto(self):
+        with tempfile.TemporaryDirectory() as repo:
+            text = "# Title\n\nSome content.\n"
+            data = {
+                "text": text,
+                "notes_repo_path": repo,
+                "meta": {"project": "demo"},
+                "date": "2026-02-24"
+            }
+            result = skill.process(data)
+            self.assertTrue(result["ok"])
+            with open(result["note_path"], "r", encoding="utf-8") as handle:
+                content = handle.read()
+            self.assertIn("# Title", content)
+            self.assertIn("Some content.", content)
+            self.assertNotIn("## TL;DR", content)
+
 
 if __name__ == "__main__":
     unittest.main()
