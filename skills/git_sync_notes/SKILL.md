@@ -10,9 +10,10 @@ description: Safely sync a notes Git repository with GitHub by pulling with reba
 
 ## Behavior
 - Verify the repo path and `.git` directory exist.
-- Pull with rebase, stage changes (default `notes/`), commit, and push.
+- Pull with rebase, stage changes (default `notes/`), validate staged note files, commit, and push.
 - Return structured JSON with actions performed and truncated git output.
 - Fail fast with clear errors on conflicts or git failures.
+- Reject invalid staged notes when they violate naming/front matter/H1/UTF-8 checks.
 - A masked default repo path is built in. Replace `DEFAULT_NOTES_REPO_PATH` in `skill.py` after installing, or pass `repo_path` in input.
 
 ## Input/Output

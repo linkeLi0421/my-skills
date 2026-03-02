@@ -1,14 +1,18 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import argparse
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 
 MAX_OUTPUT = 8000
 UNMERGED_PREFIXES = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
 DEFAULT_NOTES_REPO_PATH = "__NOTES_REPO_PATH__"
+NOTE_FILE_RE = re.compile(r"^notes/\d{4}/\d{4}-\d{2}/\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+LEGACY_SHORTID_RE = re.compile(r".*-[0-9a-f]{8}$")
 
 
 def truncate(text):
@@ -103,6 +107,98 @@ def build_commit_message():
     return f"notes: sync {timestamp}"
 
 
+def parse_front_matter(lines):
+    if not lines or lines[0].strip() != "---":
+        return {}, 0, "missing opening front matter delimiter"
+    fm = {}
+    end = -1
+    for idx in range(1, min(len(lines), 120)):
+        line = lines[idx].rstrip("\n")
+        if line.strip() == "---":
+            end = idx
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        fm[key.strip()] = value.strip().strip('"').strip("'")
+    if end == -1:
+        return {}, 0, "missing closing front matter delimiter"
+    return fm, end + 1, ""
+
+
+def first_h1(lines, start_idx):
+    for idx in range(start_idx, len(lines)):
+        stripped = lines[idx].strip()
+        if not stripped:
+            continue
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+        return None
+    return None
+
+
+def validate_note_file(abs_path, rel_path):
+    errors = []
+    try:
+        with open(abs_path, "r", encoding="utf-8") as handle:
+            content = handle.read()
+    except UnicodeDecodeError:
+        return [f"{rel_path}: file is not valid UTF-8"]
+
+    lines = content.splitlines()
+
+    if not NOTE_FILE_RE.match(rel_path.replace("\\", "/")):
+        errors.append(
+            f"{rel_path}: invalid filename/path; expected notes/YYYY/YYYY-MM/YYYY-MM-DD-topic-slug.md"
+        )
+    else:
+        stem = os.path.basename(rel_path).replace(".md", "")
+        if LEGACY_SHORTID_RE.match(stem):
+            errors.append(f"{rel_path}: filename appears to include a legacy shortid suffix")
+
+    fm, body_start, fm_error = parse_front_matter(lines)
+    if fm_error:
+        errors.append(f"{rel_path}: {fm_error}")
+        return errors
+
+    for key in ("title", "date", "project", "topic"):
+        if not fm.get(key):
+            errors.append(f"{rel_path}: missing required front matter field '{key}'")
+
+    note_date = fm.get("date", "")
+    if note_date and not DATE_RE.match(note_date):
+        errors.append(f"{rel_path}: front matter date must be YYYY-MM-DD")
+
+    base_name = os.path.basename(rel_path).replace(".md", "")
+    if note_date and DATE_RE.match(note_date) and not base_name.startswith(f"{note_date}-"):
+        errors.append(f"{rel_path}: filename date prefix must match front matter date")
+
+    h1 = first_h1(lines, body_start)
+    if not h1:
+        errors.append(f"{rel_path}: first non-empty heading must be an H1")
+    elif fm.get("title") and h1 != fm.get("title"):
+        errors.append(f"{rel_path}: first H1 must exactly match front matter title")
+
+    return errors
+
+
+def validate_staged_notes(repo_path, staged):
+    issues = []
+    for rel_path in staged:
+        rel_norm = rel_path.replace("\\", "/")
+        if not rel_norm.startswith("notes/"):
+            continue
+        if not rel_norm.endswith(".md"):
+            continue
+        if not re.match(r"^notes/\d{4}/\d{4}-\d{2}/", rel_norm):
+            continue
+        abs_path = os.path.join(repo_path, rel_path)
+        if not os.path.isfile(abs_path):
+            continue
+        issues.extend(validate_note_file(abs_path, rel_norm))
+    return issues
+
+
 def process(data):
     if not isinstance(data, dict):
         raise ValueError("Input JSON must be an object")
@@ -178,6 +274,11 @@ def process(data):
         raise RuntimeError("git diff --cached failed")
     staged = [line for line in proc.stdout.splitlines() if line.strip()]
 
+    validation_issues = validate_staged_notes(repo_path, staged)
+    if validation_issues:
+        joined = "\n".join(validation_issues[:20])
+        raise RuntimeError(f"Note validation failed:\n{joined}")
+
     if not staged and not allow_empty_commit:
         return {
             "ok": True,
@@ -243,3 +344,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+

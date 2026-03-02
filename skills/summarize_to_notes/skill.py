@@ -1,7 +1,6 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import argparse
 import datetime as dt
-import hashlib
 import json
 import os
 import re
@@ -22,6 +21,18 @@ FILE_LINE_RE = re.compile(r"([A-Za-z0-9_./\\-]+):(\d+)(?::(\d+))?")
 URL_RE = re.compile(r"https?://\S+")
 ERROR_RE = re.compile(r"\b(error|fatal|exception|traceback)\b", re.IGNORECASE)
 WARNING_RE = re.compile(r"\bwarning\b", re.IGNORECASE)
+MALFORMED_UTF8_REPLACEMENT = "\ufffd"
+MOJIBAKE_TOKENS = ("鈥", "锛", "銆", "馃", "锟")
+
+
+def read_stdin_utf8():
+    raw_bytes = sys.stdin.buffer.read()
+    if not raw_bytes.strip():
+        return ""
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"stdin must be valid UTF-8: {exc}") from exc
 
 
 def read_input(path):
@@ -29,7 +40,7 @@ def read_input(path):
         with open(path, "r", encoding="utf-8") as handle:
             raw = handle.read()
     else:
-        raw = sys.stdin.read()
+        raw = read_stdin_utf8()
     if not raw.strip():
         raise ValueError("No input JSON provided")
     try:
@@ -271,14 +282,16 @@ def resolve_mode(mode, text):
         raise ValueError(f"mode must be one of: {', '.join(sorted(ALLOWED_MODES))}")
     if mode != "auto":
         return mode
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("#"):
-            return "document"
-        break
     return "summary"
+
+
+def has_mojibake(text):
+    if MALFORMED_UTF8_REPLACEMENT in text:
+        return True
+    token_hits = sum(text.count(token) for token in MOJIBAKE_TOKENS)
+    if token_hits >= 8 and token_hits / max(len(text), 1) > 0.01:
+        return True
+    return False
 
 
 def build_tldr(title, meta, file_refs, evidence_count):
@@ -415,10 +428,11 @@ def build_document_summary(title, meta):
 def render_note(note_id, date_str, project, topic, tags, source, confidence, title, tldr, findings, evidence, next_steps, links):
     lines = [
         "---",
-        f"id: {note_id}",
+        f"title: {yaml_safe(title)}",
         f"date: {date_str}",
         f"project: {yaml_safe(project)}",
         f"topic: {yaml_safe(topic)}",
+        f"id: {note_id}",
         f"tags: {yaml_inline_list(tags)}",
         f"source: {yaml_safe(source)}",
         f"confidence: {confidence}",
@@ -454,10 +468,11 @@ def render_note(note_id, date_str, project, topic, tags, source, confidence, tit
 def render_document(note_id, date_str, project, topic, tags, source, confidence, title, body):
     lines = [
         "---",
-        f"id: {note_id}",
+        f"title: {yaml_safe(title)}",
         f"date: {date_str}",
         f"project: {yaml_safe(project)}",
         f"topic: {yaml_safe(topic)}",
+        f"id: {note_id}",
         f"tags: {yaml_inline_list(tags)}",
         f"source: {yaml_safe(source)}",
         f"confidence: {confidence}",
@@ -485,6 +500,8 @@ def process(data):
     if not isinstance(data, dict):
         raise ValueError("Input JSON must be an object")
     text = ensure_string(data.get("text"), "text", required=True)
+    if has_mojibake(text):
+        raise ValueError("Input text appears garbled (possible mojibake). Refusing to write corrupted note.")
     notes_repo_path = ensure_string(data.get("notes_repo_path"), "notes_repo_path")
     mode = ensure_string(data.get("mode"), "mode")
     meta = data.get("meta") or {}
@@ -529,25 +546,17 @@ def process(data):
         if doc_title:
             title = doc_title
 
-    slug_basis = None
     project = meta.get("project") or "general"
     topic = meta.get("topic") or "general"
-    if mode == "document":
-        if slug_hint:
-            slug_basis = slug_hint
-        else:
-            slug_basis = title
-    elif meta.get("project") or meta.get("topic"):
-        slug_basis = " ".join([item for item in [meta.get("project"), meta.get("topic")] if item])
+    if meta.get("topic"):
+        slug_basis = meta.get("topic")
     elif slug_hint:
         slug_basis = slug_hint
     else:
         slug_basis = title
     slug = slugify(slug_basis)
 
-    shortid_seed = f"{text}\n{date_str}"
-    shortid = hashlib.sha1(shortid_seed.encode("utf-8")).hexdigest()[:8]
-    note_id = f"{date_str}-{slug}-{shortid}"
+    note_id = f"{date_str}-{slug}"
 
     source = meta.get("source") or "chat"
     if mode == "document":
@@ -593,7 +602,7 @@ def process(data):
 
     year = date_str[:4]
     year_month = date_str[:7]
-    filename = f"{date_str}-{slug}-{shortid}.md"
+    filename = f"{date_str}-{slug}.md"
     note_path = os.path.join(notes_repo_path, "notes", year, year_month, filename)
     os.makedirs(os.path.dirname(note_path), exist_ok=True)
 
@@ -635,3 +644,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
